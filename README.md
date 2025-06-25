@@ -20,7 +20,7 @@ Este proyecto es un sistema básico de interpretación de lenguaje de señas uti
 ## 🚀 Requisitos
 
 - Python 3.10 ✅ (**MediaPipe no es compatible con 3.11+**)
-https://www.python.org/downloads/release/python-3100/
+  https://www.python.org/downloads/release/python-3100/
 - pip
 
 ---

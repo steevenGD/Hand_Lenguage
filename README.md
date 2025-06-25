@@ -20,7 +20,7 @@ Este proyecto es un sistema básico de interpretación de lenguaje de señas uti
 ## 🚀 Requisitos
 
 - Python 3.10 ✅ (**MediaPipe no es compatible con 3.11+**)
-  https://www.python.org/downloads/release/python-3100/
+  - https://www.python.org/downloads/release/python-3100/
 - pip
 
 ---
@@ -30,10 +30,8 @@ Este proyecto es un sistema básico de interpretación de lenguaje de señas uti
 ### 1. Clonar el repositorio:
 
 ```bash
-git clone https://github.com/tu-usuario/interprete-lenguaje-senas.git
-cd interprete-lenguaje-senas
+git clone https://github.com/steevenGD/Hand_Lenguage.git
 ```
-
 ### 2. Crear entorno virtual (OPCIONAL):
 ```bash
 python -m venv venv

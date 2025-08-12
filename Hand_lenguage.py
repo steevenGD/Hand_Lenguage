@@ -15,10 +15,10 @@ class HandLanguageGUI:
         self.root.title("Lenguaje de Señas ASL")
         self.root.geometry("1000x700")
         self.root.configure(bg='#2c3e50')
-        
+
         # Inicializar detector ASL
         self.asl_detector = ASLGestureDetector()
-        
+
         # Variables del juego
         self.gestos_disponibles = self.asl_detector.obtener_gestos_disponibles()
         self.gesto_actual = random.choice(self.gestos_disponibles)
@@ -27,18 +27,176 @@ class HandLanguageGUI:
         self.tiempo_limite = 8  # Más tiempo para gestos complejos
         self.gesto_reconocido = False
         self.juego_activo = False
-        
+
+        # Variables modo práctica
+        self.practica_activa = False
+        self.gesto_practica = None
+
         # MediaPipe
         self.mp_hands = mp.solutions.hands
         self.mp_draw = mp.solutions.drawing_utils
         self.cap = None
-        
+
         # Variables para evitar parpadeo
         self.frame_queue = queue.Queue(maxsize=2)
         self.gesto_detectado_actual = None
         self.update_video_job = None
-        
-        self.crear_interfaz()
+
+        self.crear_pantalla_inicio()
+
+    def crear_pantalla_inicio(self):
+        self.limpiar_ventana()
+        frame_inicio = tk.Frame(self.root, bg='#2c3e50')
+        frame_inicio.pack(expand=True)
+        tk.Label(frame_inicio, text="Bienvenido a Lenguaje de Señas ASL", font=('Arial', 22, 'bold'), fg='#ecf0f1', bg='#2c3e50').pack(pady=30)
+        btn_jugar = tk.Button(frame_inicio, text="Jugar", font=('Arial', 16, 'bold'), bg='#27ae60', fg='white', width=15, command=self.iniciar_juego)
+        btn_jugar.pack(pady=15)
+        btn_practicar = tk.Button(frame_inicio, text="Practicar", font=('Arial', 16, 'bold'), bg='#3498db', fg='white', width=15, command=self.iniciar_practica)
+        btn_practicar.pack(pady=15)
+
+    def limpiar_ventana(self):
+        for widget in self.root.winfo_children():
+            widget.destroy()
+
+    def iniciar_practica(self):
+        self.practica_activa = True
+        self.limpiar_ventana()
+        frame_practica = tk.Frame(self.root, bg='#2c3e50')
+        frame_practica.pack(expand=True, fill='both')
+
+        tk.Label(frame_practica, text="Modo Práctica", font=('Arial', 20, 'bold'), fg='#ecf0f1', bg='#2c3e50').pack(pady=10)
+
+        # Selección de palabra antes de mostrar práctica
+        select_frame = tk.Frame(frame_practica, bg='#2c3e50')
+        select_frame.pack(pady=10)
+        tk.Label(select_frame, text="Selecciona una palabra para practicar:", font=('Arial', 14, 'bold'), fg='#ecf0f1', bg='#2c3e50').pack(side='left', padx=5)
+        self.combo_palabras = ttk.Combobox(select_frame, values=self.gestos_disponibles, font=('Arial', 12), state='readonly')
+        self.combo_palabras.pack(side='left', padx=5)
+        self.combo_palabras.bind("<<ComboboxSelected>>", self.seleccionar_gesto_practica)
+
+        # Frame principal de práctica (imagen y cámara)
+        self.frame_practica_main = tk.Frame(frame_practica, bg='#2c3e50')
+        self.frame_practica_main.pack(expand=True, fill='both', padx=20, pady=10)
+
+        # Palabra seleccionada arriba centrada
+        self.label_palabra_practica = tk.Label(self.frame_practica_main, text="", font=('Arial', 22, 'bold'), fg='#e74c3c', bg='#2c3e50')
+        self.label_palabra_practica.pack(pady=10)
+
+        # Contenedor horizontal para imagen y cámara
+        contenedor = tk.Frame(self.frame_practica_main, bg='#2c3e50')
+        contenedor.pack(expand=True, fill='both')
+
+        # Imagen del gesto (de momento en blanco)
+        img_frame = tk.Frame(contenedor, bg='#34495e', relief='raised', bd=2)
+        img_frame.pack(side='left', expand=True, fill='both', padx=(0, 10), ipadx=10, ipady=10)
+        self.img_gesto_label = tk.Label(img_frame, bg='#ecf0f1')
+        self.img_gesto_label.pack(expand=True, fill='both', padx=10, pady=10)
+
+        # Cámara para practicar (más grande)
+        cam_frame = tk.Frame(contenedor, bg='#34495e', relief='raised', bd=2)
+        cam_frame.pack(side='right', expand=True, fill='both', padx=(10, 0), ipadx=10, ipady=10)
+        self.video_label_practica = tk.Label(cam_frame, bg='#34495e', text="Selecciona una palabra", font=('Arial', 16), fg='#ecf0f1')
+        self.video_label_practica.pack(expand=True, fill='both', padx=10, pady=10)
+
+        # Botón para volver
+        btn_volver = tk.Button(self.frame_practica_main, text="Volver", font=('Arial', 12, 'bold'), bg='#e74c3c', fg='white', command=self.crear_pantalla_inicio)
+        btn_volver.pack(pady=10)
+
+        # Iniciar cámara para práctica
+        self.cap = cv2.VideoCapture(0)
+        if not self.cap.isOpened():
+            messagebox.showerror("Error", "No se pudo abrir la cámara")
+            return
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        self.cap.set(cv2.CAP_PROP_FPS, 30)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        self.video_thread_practica = threading.Thread(target=self.capturar_video_practica)
+        self.video_thread_practica.daemon = True
+        self.video_thread_practica.start()
+        self.actualizar_video_practica()
+
+    def seleccionar_gesto_practica(self, event):
+        self.gesto_practica = self.combo_palabras.get()
+        self.label_palabra_practica.config(text=f"{self.gesto_practica}")
+        # Aquí podrías cargar la imagen correspondiente al gesto seleccionado
+        # Por ahora, solo muestra una imagen en blanco
+        img = Image.new('RGB', (320, 240), color = 'white')
+        imgtk = ImageTk.PhotoImage(image=img)
+        self.img_gesto_label.configure(image=imgtk)
+        self.img_gesto_label.image = imgtk
+
+    def capturar_video_practica(self):
+        # Sin estela ni círculo de referencia
+        feedback_timer = None
+        feedback_text = None
+        feedback_color = (0, 255, 0)
+        with self.mp_hands.Hands(
+            min_detection_confidence=0.8,
+            min_tracking_confidence=0.8,
+            max_num_hands=2,
+            static_image_mode=False
+        ) as hands:
+            while self.practica_activa and self.cap and self.cap.isOpened():
+                ret, frame = self.cap.read()
+                if not ret:
+                    continue
+                frame = cv2.flip(frame, 1)
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                results = hands.process(frame_rgb)
+                manos_landmarks = []
+                if results.multi_hand_landmarks:
+                    for hand_landmarks in results.multi_hand_landmarks:
+                        manos_landmarks.append(hand_landmarks)
+                        self.mp_draw.draw_landmarks(
+                            frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS,
+                            self.mp_draw.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
+                            self.mp_draw.DrawingSpec(color=(255, 0, 0), thickness=2)
+                        )
+                    gesto_detectado = self.asl_detector.detectar_gesto_asl(manos_landmarks)
+                    # Solo actualizar feedback si no está activo o ya pasaron los 2 segundos
+                    if self.gesto_practica and gesto_detectado:
+                        if feedback_timer is None or (time.time() - feedback_timer >= 2):
+                            if gesto_detectado == self.gesto_practica:
+                                feedback_text = "¡CORRECTO!"
+                                feedback_color = (0, 255, 0)
+                            else:
+                                feedback_text = "INCORRECTO"
+                                feedback_color = (0, 0, 255)
+                            feedback_timer = time.time()
+                # Mostrar feedback solo durante 2 segundos
+                if feedback_text and feedback_timer and (time.time() - feedback_timer < 2):
+                    cv2.putText(frame, feedback_text, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, feedback_color, 2)
+                elif feedback_text and feedback_timer and (time.time() - feedback_timer >= 2):
+                    feedback_text = None
+                    feedback_timer = None
+                if not hasattr(self, 'frame_queue_practica'):
+                    self.frame_queue_practica = queue.Queue(maxsize=2)
+                if not self.frame_queue_practica.full():
+                    try:
+                        self.frame_queue_practica.put_nowait(frame)
+                    except:
+                        pass
+                time.sleep(1/30)
+
+    def actualizar_video_practica(self):
+        if self.practica_activa:
+            try:
+                frame = None
+                while hasattr(self, 'frame_queue_practica') and not self.frame_queue_practica.empty():
+                    frame = self.frame_queue_practica.get_nowait()
+                if frame is not None:
+                    frame_resized = cv2.resize(frame, (640, 480))
+                    frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+                    img = Image.fromarray(frame_rgb)
+                    imgtk = ImageTk.PhotoImage(image=img)
+                    self.video_label_practica.configure(image=imgtk, text="")
+                    self.video_label_practica.image = imgtk
+            except queue.Empty:
+                pass
+            except Exception as e:
+                print(f"Error actualizando video práctica: {e}")
+            self.root.after(33, self.actualizar_video_practica)
         
     def crear_interfaz(self):
         # Título principal
@@ -60,7 +218,7 @@ class HandLanguageGUI:
                 fg='#ecf0f1', bg='#34495e').pack(pady=5)
         
         self.video_label = tk.Label(video_frame, bg='#34495e', text="Presiona 'Iniciar Juego'", 
-                                   font=('Arial', 16), fg='#ecf0f1')
+                    font=('Arial', 16), fg='#ecf0f1')
         self.video_label.pack(expand=True, fill='both', padx=10, pady=10)
         
         # Frame derecho - Controles
@@ -174,80 +332,80 @@ class HandLanguageGUI:
     
     def iniciar_juego(self):
         self.juego_activo = True
+        self.practica_activa = False
+        self.limpiar_ventana()
+        self.crear_interfaz()
         self.iniciar_btn.config(state='disabled')
         self.pausar_btn.config(state='normal')
-        
         # Configurar cámara
         self.cap = cv2.VideoCapture(0)
         if not self.cap.isOpened():
             messagebox.showerror("Error", "No se pudo abrir la cámara")
             return
-        
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         self.cap.set(cv2.CAP_PROP_FPS, 30)
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        
         # Iniciar threads
         self.video_thread = threading.Thread(target=self.capturar_video)
         self.video_thread.daemon = True
         self.video_thread.start()
-        
         self.actualizar_video()
         self.actualizar_interfaz()
     
     def capturar_video(self):
-        """Captura video y detecta gestos ASL"""
+        """Captura video y detecta gestos ASL (soporta gestos de dos manos)"""
         with self.mp_hands.Hands(
             min_detection_confidence=0.8,
             min_tracking_confidence=0.8,
-            max_num_hands=1,
+            max_num_hands=2,
             static_image_mode=False
         ) as hands:
-            
             while self.juego_activo and self.cap and self.cap.isOpened():
                 ret, frame = self.cap.read()
                 if not ret:
                     continue
-                
                 frame = cv2.flip(frame, 1)
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 results = hands.process(frame_rgb)
-                
+                manos_landmarks = []
                 if results.multi_hand_landmarks:
                     for hand_landmarks in results.multi_hand_landmarks:
+                        manos_landmarks.append(hand_landmarks)
                         self.mp_draw.draw_landmarks(
                             frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS,
                             self.mp_draw.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
                             self.mp_draw.DrawingSpec(color=(255, 0, 0), thickness=2)
                         )
-                        
-                        # Detectar gesto ASL
-                        gesto = self.asl_detector.detectar_gesto_asl(hand_landmarks)
-                        if gesto:
-                            self.gesto_detectado_actual = gesto
-                            
-                            if gesto == self.gesto_actual and not self.gesto_reconocido:
-                                self.puntuacion += 20
-                                self.gesto_reconocido = True
-                                
-                                cv2.putText(frame, "¡CORRECTO! +20", (50, 50), 
-                                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                        else:
-                            self.gesto_detectado_actual = None
+                    # Detectar gesto ASL con ambas manos
+                    gesto = self.asl_detector.detectar_gesto_asl(manos_landmarks)
+                    if gesto:
+                        self.gesto_detectado_actual = gesto
+                        if gesto == self.gesto_actual and not self.gesto_reconocido:
+                            self.puntuacion += 20
+                            self.gesto_reconocido = True
+                            cv2.putText(frame, "¡CORRECTO! +20", (50, 50), 
+                                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                            self.estado_label.config(text=f"Detectado: {self.gesto_detectado_actual}", fg="#27ae60")
+                            # Usar after para cambiar la palabra objetivo después de 2 segundos sin pausar la cámara
+                            def siguiente_palabra():
+                                self.gesto_actual = random.choice(self.gestos_disponibles)
+                                self.tiempo_inicio = time.time()
+                                self.gesto_reconocido = False
+                                self.gesto_detectado_actual = None
+                            self.root.after(2000, siguiente_palabra)
+                    else:
+                        self.gesto_detectado_actual = None
                 else:
                     self.gesto_detectado_actual = None
-                
                 # Mostrar palabra objetivo
                 cv2.putText(frame, f"Palabra: {self.gesto_actual}", (10, 30), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                
                 if not self.frame_queue.full():
                     try:
                         self.frame_queue.put_nowait(frame)
                     except:
                         pass
-                
                 time.sleep(1/30)
     
     def actualizar_video(self):

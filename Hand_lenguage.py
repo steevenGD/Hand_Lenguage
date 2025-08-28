@@ -7,24 +7,28 @@ import time
 import threading
 from PIL import Image, ImageTk
 import queue
-from Gestures import ASLGestureDetector
+import numpy as np
+import tensorflow as tf
 
 class HandLanguageGUI:
     def __init__(self, root):
+        import tensorflow as tf
+        import numpy as np
+        self.modelo_lstm = tf.keras.models.load_model('modelo_gestos_lstm.h5')
+        self.labels_lstm = np.load('labels_lstm.npy')
+        self.sequence_length = 60
+        self.landmark_buffer = []
+
         self.root = root
         self.root.title("Lenguaje de Señas ASL")
         self.root.geometry("1000x700")
         self.root.configure(bg='#2c3e50')
 
-        # Inicializar detector ASL
-        self.asl_detector = ASLGestureDetector()
-
         # Variables del juego
-        self.gestos_disponibles = self.asl_detector.obtener_gestos_disponibles()
-        self.gesto_actual = random.choice(self.gestos_disponibles)
+        self.gesto_actual = None
         self.puntuacion = 0
         self.tiempo_inicio = time.time()
-        self.tiempo_limite = 8  # Más tiempo para gestos complejos
+        self.tiempo_limite = 8 
         self.gesto_reconocido = False
         self.juego_activo = False
 
@@ -70,7 +74,7 @@ class HandLanguageGUI:
         select_frame = tk.Frame(frame_practica, bg='#2c3e50')
         select_frame.pack(pady=10)
         tk.Label(select_frame, text="Selecciona una palabra para practicar:", font=('Arial', 14, 'bold'), fg='#ecf0f1', bg='#2c3e50').pack(side='left', padx=5)
-        self.combo_palabras = ttk.Combobox(select_frame, values=self.gestos_disponibles, font=('Arial', 12), state='readonly')
+        self.combo_palabras = ttk.Combobox(select_frame, values=list(self.labels_lstm), font=('Arial', 12), state='readonly')
         self.combo_palabras.pack(side='left', padx=5)
         self.combo_palabras.bind("<<ComboboxSelected>>", self.seleccionar_gesto_practica)
 
@@ -127,10 +131,13 @@ class HandLanguageGUI:
         self.img_gesto_label.image = imgtk
 
     def capturar_video_practica(self):
-        # Sin estela ni círculo de referencia
         feedback_timer = None
         feedback_text = None
         feedback_color = (0, 255, 0)
+        last_feedback = None
+        last_gesto_correcto = False
+        feedback_duration = 2.0  # Segundos que se muestra el feedback
+        ignore_pred_until = 0
         with self.mp_hands.Hands(
             min_detection_confidence=0.8,
             min_tracking_confidence=0.8,
@@ -153,23 +160,38 @@ class HandLanguageGUI:
                             self.mp_draw.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
                             self.mp_draw.DrawingSpec(color=(255, 0, 0), thickness=2)
                         )
-                    gesto_detectado = self.asl_detector.detectar_gesto_asl(manos_landmarks)
-                    # Solo actualizar feedback si no está activo o ya pasaron los 2 segundos
-                    if self.gesto_practica and gesto_detectado:
-                        if feedback_timer is None or (time.time() - feedback_timer >= 2):
-                            if gesto_detectado == self.gesto_practica:
-                                feedback_text = "¡CORRECTO!"
-                                feedback_color = (0, 255, 0)
-                            else:
-                                feedback_text = "INCORRECTO"
-                                feedback_color = (0, 0, 255)
-                            feedback_timer = time.time()
-                # Mostrar feedback solo durante 2 segundos
-                if feedback_text and feedback_timer and (time.time() - feedback_timer < 2):
+                now = time.time()
+                # Solo predecir si no estamos mostrando feedback
+                if not (feedback_text == "¡CORRECTO!" and feedback_timer and (now - feedback_timer < feedback_duration)):
+                    gesto_detectado = self.detectar_gesto_lstm(manos_landmarks)
+                    print(f"[DEBUG] Gesto detectado: {gesto_detectado}")
+                    nuevo_feedback = None
+                    nuevo_color = None
+                    if self.gesto_practica:
+                        if gesto_detectado == self.gesto_practica:
+                            nuevo_feedback = "¡CORRECTO!"
+                            nuevo_color = (0, 255, 0)
+                        elif gesto_detectado is None:
+                            nuevo_feedback = "NO DETECTADO"
+                            nuevo_color = (128, 128, 128)
+                        else:
+                            nuevo_feedback = "INCORRECTO"
+                            nuevo_color = (0, 0, 255)
+                    # Solo actualiza feedback y timer si el feedback cambia
+                    if nuevo_feedback != last_feedback:
+                        feedback_text = nuevo_feedback
+                        feedback_color = nuevo_color
+                        feedback_timer = now
+                        last_feedback = nuevo_feedback
+                # Mostrar feedback durante feedback_duration segundos
+                if feedback_text and feedback_timer and (now - feedback_timer < feedback_duration):
                     cv2.putText(frame, feedback_text, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, feedback_color, 2)
-                elif feedback_text and feedback_timer and (time.time() - feedback_timer >= 2):
+                    if feedback_text == "¡CORRECTO!" and (now - feedback_timer >= feedback_duration - 0.05):
+                        self.landmark_buffer = []  # Limpiar buffer justo al terminar el feedback
+                elif feedback_text and feedback_timer and (now - feedback_timer >= feedback_duration):
                     feedback_text = None
                     feedback_timer = None
+                    last_feedback = None
                 if not hasattr(self, 'frame_queue_practica'):
                     self.frame_queue_practica = queue.Queue(maxsize=2)
                 if not self.frame_queue_practica.full():
@@ -240,7 +262,7 @@ class HandLanguageGUI:
         
         # Descripción del gesto
         self.descripcion_label = tk.Label(info_frame, 
-                                         text=self.asl_detector.obtener_descripcion_gesto(self.gesto_actual), 
+                                         text=self.obtener_descripcion_gesto(self.gesto_actual), 
                                          font=('Arial', 10), fg='#f39c12', bg='#34495e',
                                          wraplength=280, justify='center')
         self.descripcion_label.pack(pady=5)
@@ -282,7 +304,6 @@ class HandLanguageGUI:
         # Guía de gestos
         guia_frame = tk.Frame(control_frame, bg='#34495e')
         guia_frame.pack(fill='x', padx=10, pady=10)
-        
         tk.Label(guia_frame, text="Palabras ASL Disponibles", 
                 font=('Arial', 11, 'bold'), fg='#ecf0f1', bg='#34495e').pack()
         
@@ -300,11 +321,11 @@ class HandLanguageGUI:
         canvas.configure(yscrollcommand=scrollbar.set)
         
         # Lista de palabras ASL
-        for palabra in self.gestos_disponibles:
+        for palabra in self.labels_lstm:
             frame_palabra = tk.Frame(scrollable_frame, bg='#34495e')
             frame_palabra.pack(fill='x', pady=1)
             
-            descripcion = self.asl_detector.obtener_descripcion_gesto(palabra)
+            descripcion = self.obtener_descripcion_gesto(palabra)
             tk.Label(frame_palabra, text=f"{palabra}: {descripcion}", 
                     font=('Arial', 8), fg='#bdc3c7', bg='#34495e', 
                     anchor='w', wraplength=300).pack(fill='x')
@@ -337,6 +358,11 @@ class HandLanguageGUI:
         self.crear_interfaz()
         self.iniciar_btn.config(state='disabled')
         self.pausar_btn.config(state='normal')
+        # Elegir palabra objetivo al iniciar
+        self.gesto_actual = random.choice(self.labels_lstm)
+        self.tiempo_inicio = time.time()
+        self.gesto_reconocido = False
+        self.gesto_detectado_actual = None
         # Configurar cámara
         self.cap = cv2.VideoCapture(0)
         if not self.cap.isOpened():
@@ -361,6 +387,9 @@ class HandLanguageGUI:
             max_num_hands=2,
             static_image_mode=False
         ) as hands:
+            feedback_timer = None
+            feedback_duration = 2.0  # segundos
+            feedback_active = False
             while self.juego_activo and self.cap and self.cap.isOpened():
                 ret, frame = self.cap.read()
                 if not ret:
@@ -377,27 +406,34 @@ class HandLanguageGUI:
                             self.mp_draw.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
                             self.mp_draw.DrawingSpec(color=(255, 0, 0), thickness=2)
                         )
-                    # Detectar gesto ASL con ambas manos
-                    gesto = self.asl_detector.detectar_gesto_asl(manos_landmarks)
+                now = time.time()
+                # Si estamos mostrando feedback de correcto, solo mostrar el mensaje y esperar
+                if feedback_active and feedback_timer and (now - feedback_timer < feedback_duration):
+                    cv2.putText(frame, "¡CORRECTO! +20", (50, 50), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                elif feedback_active and feedback_timer and (now - feedback_timer >= feedback_duration):
+                    # Termina feedback, pasa a siguiente palabra
+                    self.gesto_actual = random.choice(self.labels_lstm)
+                    self.tiempo_inicio = time.time()
+                    self.gesto_reconocido = False
+                    self.gesto_detectado_actual = None
+                    feedback_active = False
+                    feedback_timer = None
+                else:
+                    # Detectar gesto usando LSTM (igual que en práctica)
+                    gesto = self.detectar_gesto_lstm(manos_landmarks)
                     if gesto:
                         self.gesto_detectado_actual = gesto
                         if gesto == self.gesto_actual and not self.gesto_reconocido:
                             self.puntuacion += 20
                             self.gesto_reconocido = True
+                            feedback_active = True
+                            feedback_timer = now
                             cv2.putText(frame, "¡CORRECTO! +20", (50, 50), 
-                                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
                             self.estado_label.config(text=f"Detectado: {self.gesto_detectado_actual}", fg="#27ae60")
-                            # Usar after para cambiar la palabra objetivo después de 2 segundos sin pausar la cámara
-                            def siguiente_palabra():
-                                self.gesto_actual = random.choice(self.gestos_disponibles)
-                                self.tiempo_inicio = time.time()
-                                self.gesto_reconocido = False
-                                self.gesto_detectado_actual = None
-                            self.root.after(2000, siguiente_palabra)
                     else:
                         self.gesto_detectado_actual = None
-                else:
-                    self.gesto_detectado_actual = None
                 # Mostrar palabra objetivo
                 cv2.putText(frame, f"Palabra: {self.gesto_actual}", (10, 30), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
@@ -462,7 +498,7 @@ class HandLanguageGUI:
     
     def reiniciar_juego(self):
         self.puntuacion = 0
-        self.gesto_actual = random.choice(self.gestos_disponibles)
+        self.gesto_actual = random.choice(self.labels_lstm)
         self.tiempo_inicio = time.time()
         self.gesto_reconocido = False
         self.gesto_detectado_actual = None
@@ -472,28 +508,23 @@ class HandLanguageGUI:
         if self.juego_activo:
             tiempo_transcurrido = time.time() - self.tiempo_inicio
             tiempo_restante = max(0, self.tiempo_limite - tiempo_transcurrido)
-            
             if tiempo_restante <= 0:
                 if not self.gesto_reconocido:
                     self.puntuacion = max(0, self.puntuacion - 10)
-                
-                self.gesto_actual = random.choice(self.gestos_disponibles)
+                self.gesto_actual = random.choice(self.labels_lstm)
                 self.tiempo_inicio = time.time()
                 self.gesto_reconocido = False
                 self.gesto_detectado_actual = None
-            
             self.actualizar_labels()
             self.root.after(100, self.actualizar_interfaz)
     
     def actualizar_labels(self):
         tiempo_transcurrido = time.time() - self.tiempo_inicio
         tiempo_restante = max(0, self.tiempo_limite - tiempo_transcurrido)
-        
         self.gesto_label.config(text=f"Palabra: {self.gesto_actual}")
-        self.descripcion_label.config(text=self.asl_detector.obtener_descripcion_gesto(self.gesto_actual))
+        self.descripcion_label.config(text=self.obtener_descripcion_gesto(self.gesto_actual))
         self.tiempo_label.config(text=f"Tiempo: {tiempo_restante:.1f}s")
         self.puntuacion_label.config(text=f"Puntuacion: {self.puntuacion}")
-        
         if tiempo_restante > 4:
             self.tiempo_label.config(fg='#27ae60')
         elif tiempo_restante > 2:
@@ -512,6 +543,39 @@ class HandLanguageGUI:
         
         cv2.destroyAllWindows()
         self.root.destroy()
+
+    def obtener_descripcion_gesto(self, gesto):
+        return f"Gesto: {gesto}"
+
+    def detectar_gesto_lstm(self, manos_landmarks):
+        n_landmarks = 21
+        n_features = 3
+        total_features = n_landmarks * n_features * 2  # 126
+        # Solo predecir si hay al menos una mano detectada
+        if len(manos_landmarks) == 0:
+            self.landmark_buffer = []  # Limpiar buffer si no hay mano
+            return None
+        row = []
+        for lm in manos_landmarks[0].landmark:
+            row.extend([lm.x, lm.y, lm.z])
+        if len(manos_landmarks) > 1:
+            for lm in manos_landmarks[1].landmark:
+                row.extend([lm.x, lm.y, lm.z])
+        else:
+            row.extend([0.0] * (n_landmarks * n_features))
+        # Asegura que el vector siempre tenga 126 valores
+        if len(row) != total_features:
+            row = row[:total_features] if len(row) > total_features else row + [0.0] * (total_features - len(row))
+        self.landmark_buffer.append(row)
+        if len(self.landmark_buffer) > self.sequence_length:
+            self.landmark_buffer.pop(0)
+        if len(self.landmark_buffer) == self.sequence_length:
+            sequence_np = np.array(self.landmark_buffer).reshape(1, self.sequence_length, total_features)
+            pred = self.modelo_lstm.predict(sequence_np, verbose=0)
+            idx = np.argmax(pred)
+            label = self.labels_lstm[idx]
+            return label
+        return None
 
 if __name__ == "__main__":
     root = tk.Tk()

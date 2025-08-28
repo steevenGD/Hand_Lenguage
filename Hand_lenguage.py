@@ -14,7 +14,7 @@ class HandLanguageGUI:
     def __init__(self, root):
         import tensorflow as tf
         import numpy as np
-        self.modelo_lstm = tf.keras.models.load_model('modelo_gestos_lstm.h5')
+        self.modelo_lstm = tf.keras.models.load_model('modelo_gestos_lstm.keras')
         self.labels_lstm = np.load('labels_lstm.npy')
         self.sequence_length = 60
         self.landmark_buffer = []

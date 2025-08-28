@@ -53,6 +53,6 @@ loss, acc = model.evaluate(X_test, y_test)
 print(f"Test accuracy: {acc:.3f}")
 
 # Guardar modelo y etiquetas
-model.save('modelo_gestos_lstm.h5')
+model.save('modelo_gestos_lstm.keras')
 np.save('labels_lstm.npy', le.classes_)
 print("Modelo y etiquetas guardados.")

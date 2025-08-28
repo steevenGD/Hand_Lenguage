@@ -5,7 +5,7 @@ import csv
 import os
 
 # Configura los gestos que quieres capturar
-GESTURES = ["Reposo", "Hola", "Adios", "Si", "No", "Paz", "Te quiero"]
+GESTURES = ["Reposo", "Hola", "Adios", "Si", "Paz", "Te quiero"]
 OUTPUT_FILE = "gestures_data.csv"
 SEQUENCE_LENGTH = 60  # Número de frames por secuencia
 SEQUENCE_DIR = "sequences"  # Carpeta para guardar secuencias

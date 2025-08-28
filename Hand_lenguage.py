@@ -123,9 +123,13 @@ class HandLanguageGUI:
     def seleccionar_gesto_practica(self, event):
         self.gesto_practica = self.combo_palabras.get()
         self.label_palabra_practica.config(text=f"{self.gesto_practica}")
-        # Aquí podrías cargar la imagen correspondiente al gesto seleccionado
-        # Por ahora, solo muestra una imagen en blanco
-        img = Image.new('RGB', (320, 240), color = 'white')
+        # Cargar la imagen correspondiente al gesto seleccionado
+        try:
+            img_path = f"imagenes_gestos/{self.gesto_practica.lower()}.png"
+            img = Image.open(img_path).resize((640, 480))
+        except Exception:
+            # Si no existe la imagen, muestra una en blanco
+            img = Image.new('RGB', (640, 480), color='white')
         imgtk = ImageTk.PhotoImage(image=img)
         self.img_gesto_label.configure(image=imgtk)
         self.img_gesto_label.image = imgtk
@@ -162,14 +166,14 @@ class HandLanguageGUI:
                         )
                 now = time.time()
                 # Solo predecir si no estamos mostrando feedback
-                if not (feedback_text == "¡CORRECTO!" and feedback_timer and (now - feedback_timer < feedback_duration)):
+                if not (feedback_text == "CORRECTO" and feedback_timer and (now - feedback_timer < feedback_duration)):
                     gesto_detectado = self.detectar_gesto_lstm(manos_landmarks)
                     print(f"[DEBUG] Gesto detectado: {gesto_detectado}")
                     nuevo_feedback = None
                     nuevo_color = None
                     if self.gesto_practica:
                         if gesto_detectado == self.gesto_practica:
-                            nuevo_feedback = "¡CORRECTO!"
+                            nuevo_feedback = "CORRECTO"
                             nuevo_color = (0, 255, 0)
                         elif gesto_detectado is None:
                             nuevo_feedback = "NO DETECTADO"
@@ -186,7 +190,7 @@ class HandLanguageGUI:
                 # Mostrar feedback durante feedback_duration segundos
                 if feedback_text and feedback_timer and (now - feedback_timer < feedback_duration):
                     cv2.putText(frame, feedback_text, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, feedback_color, 2)
-                    if feedback_text == "¡CORRECTO!" and (now - feedback_timer >= feedback_duration - 0.05):
+                    if feedback_text == "CORRECTO" and (now - feedback_timer >= feedback_duration - 0.05):
                         self.landmark_buffer = []  # Limpiar buffer justo al terminar el feedback
                 elif feedback_text and feedback_timer and (now - feedback_timer >= feedback_duration):
                     feedback_text = None
@@ -210,7 +214,7 @@ class HandLanguageGUI:
                 if frame is not None:
                     frame_resized = cv2.resize(frame, (640, 480))
                     frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
-                    img = Image.fromarray(frame_rgb)
+                    img = Image.fromarray(frame_rgb).resize((640, 480))
                     imgtk = ImageTk.PhotoImage(image=img)
                     self.video_label_practica.configure(image=imgtk, text="")
                     self.video_label_practica.image = imgtk

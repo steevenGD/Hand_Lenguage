@@ -7,14 +7,10 @@ Un sistema interactivo de aprendizaje de lenguaje de señas que utiliza **MediaP
 - [Características](#-características)
 - [Requisitos del Sistema](#-requisitos-del-sistema)
 - [Instalación](#-instalación)
-- [Configuración en PyCharm](#-configuración-en-pycharm)
-- [Configuración en Visual Studio Code](#-configuración-en-visual-studio-code)
 - [Ejecución del Proyecto](#-ejecución-del-proyecto)
 - [Estructura del Proyecto](#-estructura-del-proyecto)
 - [Uso de la Aplicación](#-uso-de-la-aplicación)
 - [Entrenamiento del Modelo](#-entrenamiento-del-modelo)
-- [Solución de Problemas](#-solución-de-problemas)
-- [Contribución](#-contribución)
 
 ## ✨ Características
 
@@ -189,35 +185,4 @@ Hand_Lenguage/
 2. **Entrenamiento:** Ejecutar `train_gesture_model.py`
 3. **Validación:** El modelo se evalúa automáticamente
 4. **Guardado:** Se generan `modelo_gestos_lstm.keras` y `labels_lstm.npy`
-
-## 🔧 Solución de Problemas
-
-### Error: "No module named 'mediapipe'"
-```bash
-pip install mediapipe
-```
-
-### Error: "Could not open camera"
-- Verifica que la cámara no esté siendo usada por otra aplicación
-- Prueba cambiar el índice de cámara en el código (0, 1, 2...)
-- En Windows, verifica los permisos de cámara
-
-### Error de versión de Python
-```bash
-# Verificar versión
-python --version
-
-# Si tienes Python 3.11+, instala una versión compatible
-# Usa pyenv o descarga Python 3.10 desde python.org
-```
-
-### Rendimiento lento
-- Cierra otras aplicaciones que usen la cámara
-- Reduce la resolución de la cámara en el código
-- Asegúrate de tener suficiente RAM disponible
-
-### El modelo no reconoce gestos
-- Verifica que existan los archivos `modelo_gestos_lstm.keras` y `labels_lstm.npy`
-- Si no existen, ejecuta `train_gesture_model.py`
-- Asegúrate de tener datos en la carpeta `sequences/`
 

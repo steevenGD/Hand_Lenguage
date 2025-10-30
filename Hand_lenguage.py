@@ -139,8 +139,8 @@ class HandLanguageGUI:
         feedback_text = None
         feedback_color = (0, 255, 0)
         last_feedback = None
-        
         feedback_duration = 2.0  # Segundos que se muestra el feedback
+
         with self.mp_hands.Hands(
             min_detection_confidence=0.8,
             min_tracking_confidence=0.8,
@@ -148,61 +148,97 @@ class HandLanguageGUI:
             static_image_mode=False
         ) as hands:
             while self.practica_activa and self.cap and self.cap.isOpened():
-                ret, frame = self.cap.read()
-                if not ret:
+                frame = self._leer_frame()
+                if frame is None:
                     continue
-                frame = cv2.flip(frame, 1)
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                results = hands.process(frame_rgb)
-                manos_landmarks = []
-                if results.multi_hand_landmarks:
-                    for hand_landmarks in results.multi_hand_landmarks:
-                        manos_landmarks.append(hand_landmarks)
-                        self.mp_draw.draw_landmarks(
-                            frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS,
-                            self.mp_draw.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
-                            self.mp_draw.DrawingSpec(color=(255, 0, 0), thickness=2)
-                        )
+
+                manos_landmarks = self._procesar_manos(frame, hands)
                 now = time.time()
-                # Solo predecir si no estamos mostrando feedback
-                if not (feedback_text == "CORRECTO" and feedback_timer and (now - feedback_timer < feedback_duration)):
-                    gesto_detectado = self.detectar_gesto_lstm(manos_landmarks)
-                    print(f"[DEBUG] Gesto detectado: {gesto_detectado}")
-                    nuevo_feedback = None
-                    nuevo_color = None
-                    if self.gesto_practica:
-                        if gesto_detectado == self.gesto_practica:
-                            nuevo_feedback = "CORRECTO"
-                            nuevo_color = (0, 255, 0)
-                        elif gesto_detectado is None:
-                            nuevo_feedback = "NO DETECTADO"
-                            nuevo_color = (128, 128, 128)
-                        else:
-                            nuevo_feedback = "INCORRECTO"
-                            nuevo_color = (0, 0, 255)
-                    # Solo actualiza feedback y timer si el feedback cambia
-                    if nuevo_feedback != last_feedback:
-                        feedback_text = nuevo_feedback
-                        feedback_color = nuevo_color
-                        feedback_timer = now
-                        last_feedback = nuevo_feedback
-                # Mostrar feedback durante feedback_duration segundos
-                if feedback_text and feedback_timer and (now - feedback_timer < feedback_duration):
-                    cv2.putText(frame, feedback_text, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, feedback_color, 2)
-                    if feedback_text == "CORRECTO" and (now - feedback_timer >= feedback_duration - 0.05):
-                        self.landmark_buffer = []  # Limpiar buffer justo al terminar el feedback
-                elif feedback_text and feedback_timer and (now - feedback_timer >= feedback_duration):
-                    feedback_text = None
-                    feedback_timer = None
-                    last_feedback = None
-                if not hasattr(self, 'frame_queue_practica'):
-                    self.frame_queue_practica = queue.Queue(maxsize=2)
-                if not self.frame_queue_practica.full():
-                    try:
-                        self.frame_queue_practica.put_nowait(frame)
-                    except:
-                        pass
-                time.sleep(1/30)
+
+                feedback_text, feedback_color, feedback_timer, last_feedback = self._actualizar_feedback(
+                    manos_landmarks, now, feedback_text, feedback_color, feedback_timer,
+                    last_feedback, feedback_duration
+                )
+
+                feedback_text, feedback_timer, last_feedback = self._mostrar_feedback(
+                    frame, feedback_text, feedback_color, feedback_timer,
+                    last_feedback, feedback_duration, now
+                )
+
+                self._encolar_frame(frame)
+                time.sleep(1 / 30)
+    
+    def _leer_frame(self):
+        """Lee y prepara el frame para análisis."""
+        ret, frame = self.cap.read()
+        if not ret:
+            return None
+        return cv2.flip(frame, 1)
+
+    def _procesar_manos(self, frame, hands):
+        """Detecta y dibuja manos en el frame."""
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = hands.process(frame_rgb)
+        manos_landmarks = []
+        if results.multi_hand_landmarks:
+            for hand_landmarks in results.multi_hand_landmarks:
+                manos_landmarks.append(hand_landmarks)
+                self.mp_draw.draw_landmarks(
+                    frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS,
+                    self.mp_draw.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
+                    self.mp_draw.DrawingSpec(color=(255, 0, 0), thickness=2)
+                )
+        return manos_landmarks
+
+    def _actualizar_feedback(self, manos_landmarks, now, feedback_text, feedback_color,
+                            feedback_timer, last_feedback, feedback_duration):
+        """Actualiza el texto de feedback según el gesto detectado."""
+        if not (feedback_text == "CORRECTO" and feedback_timer and (now - feedback_timer < feedback_duration)):
+            gesto_detectado = self.detectar_gesto_lstm(manos_landmarks)
+            print(f"[DEBUG] Gesto detectado: {gesto_detectado}")
+
+            nuevo_feedback, nuevo_color = self._evaluar_gesto(gesto_detectado)
+
+            if nuevo_feedback != last_feedback:
+                feedback_text = nuevo_feedback
+                feedback_color = nuevo_color
+                feedback_timer = now
+                last_feedback = nuevo_feedback
+
+        return feedback_text, feedback_color, feedback_timer, last_feedback
+
+    def _evaluar_gesto(self, gesto_detectado):
+        """Determina si el gesto es correcto, incorrecto o no detectado."""
+        if not self.gesto_practica:
+            return None, (128, 128, 128)
+        if gesto_detectado == self.gesto_practica:
+            return "CORRECTO", (0, 255, 0)
+        elif gesto_detectado is None:
+            return "NO DETECTADO", (128, 128, 128)
+        else:
+            return "INCORRECTO", (0, 0, 255)
+
+    def _mostrar_feedback(self, frame, feedback_text, feedback_color,
+                        feedback_timer, last_feedback, feedback_duration, now):
+        """Muestra el texto de feedback en pantalla y limpia cuando termina."""
+        if feedback_text and feedback_timer and (now - feedback_timer < feedback_duration):
+            cv2.putText(frame, feedback_text, (50, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, feedback_color, 2)
+            if feedback_text == "CORRECTO" and (now - feedback_timer >= feedback_duration - 0.05):
+                self.landmark_buffer = []  # Limpiar buffer
+        elif feedback_text and feedback_timer and (now - feedback_timer >= feedback_duration):
+            feedback_text, feedback_timer, last_feedback = None, None, None
+
+        return feedback_text, feedback_timer, last_feedback
+
+    def _encolar_frame(self, frame):
+        if not hasattr(self, 'frame_queue_practica'):
+            self.frame_queue_practica = queue.Queue(maxsize=2)
+        if not self.frame_queue_practica.full():
+            try:
+                self.frame_queue_practica.put_nowait(frame)
+            except queue.Full:
+                pass
 
     def actualizar_video_practica(self):
         if self.practica_activa:

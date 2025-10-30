@@ -479,8 +479,12 @@ class HandLanguageGUI:
                 if not self.frame_queue.full():
                     try:
                         self.frame_queue.put_nowait(frame)
-                    except:
-                        pass
+                    except SystemExit:
+                        raise  # re-lanzar SystemExit
+                    except KeyboardInterrupt:
+                        raise  # permitir interrumpir el programa con Ctrl+C
+                    except Exception:
+                        pass  # capturar solo errores normales
                 time.sleep(1/30)
     
     def actualizar_video(self):

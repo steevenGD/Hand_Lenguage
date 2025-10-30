@@ -139,9 +139,8 @@ class HandLanguageGUI:
         feedback_text = None
         feedback_color = (0, 255, 0)
         last_feedback = None
-        last_gesto_correcto = False
+        
         feedback_duration = 2.0  # Segundos que se muestra el feedback
-        ignore_pred_until = 0
         with self.mp_hands.Hands(
             min_detection_confidence=0.8,
             min_tracking_confidence=0.8,
